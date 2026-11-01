@@ -27,6 +27,7 @@ namespace oceanbase
 {
 namespace omt
 {
+int ai_column_worker_once();
 
 ObAiService::ObAiService()
   : is_inited_(false)
@@ -53,6 +54,7 @@ int ObAiService::init()
   int ret = OB_SUCCESS;
   if (IS_INIT) {
     ret = OB_INIT_TWICE;
+  } else if (OB_FAIL(set_thread_count(2))) {
   } else {
     is_inited_ = true;
   }
@@ -61,7 +63,27 @@ int ObAiService::init()
 
 void ObAiService::destroy()
 {
+  stop();
+  wait();
   is_inited_ = false;
+}
+
+int ObAiService::start()
+{
+  return lib::ThreadPool::start();
+}
+
+void ObAiService::run1()
+{
+  while (!has_set_stop()) {
+    THIS_WORKER.set_timeout_ts(ObTimeUtility::current_time() + 60 * 1000 * 1000);
+    const int ret = ai_column_worker_once();
+    if (ret != OB_SUCCESS && ret != OB_ITER_END && ret != OB_EAGAIN
+        && REACH_TIME_INTERVAL(10 * 1000 * 1000)) {
+      LOG_WARN("AI column worker iteration failed", K(ret));
+    }
+    ob_usleep(ret == OB_SUCCESS ? 10000 : 100000);
+  }
 }
 
 int ObAiService::get_ai_service_guard(ObAiServiceGuard &ai_service_guard)

@@ -348,11 +348,14 @@ public:
   ObAIFuncModel(ObIAllocator &allocator, const ObAIFuncExprInfo &info, const share::ObAiModelEndpointInfo &endpoint_info)
   : allocator_(&allocator),
     info_(info),
-    endpoint_info_(endpoint_info)
+      endpoint_info_(endpoint_info), max_retries_(3), timeout_sec_(60)
   {}
    virtual ~ObAIFuncModel() {}
+     void set_request_policy(int64_t retries, int64_t timeout_sec)
+     { max_retries_ = retries; timeout_sec_ = timeout_sec; }
    // completion
-   int call_completion(ObString &prompt, ObJsonObject *config, ObString &result);
+     int call_completion(ObString &prompt, ObJsonObject *config, ObString &result,
+                         const ObString &system_prompt = ObString());
    int call_completion_vector(ObArray<ObString> &prompts, ObJsonObject *config, ObArray<ObString> &results);
    // dense_embedding
    int call_dense_embedding(ObString &content, ObJsonObject *config, ObString &result);
@@ -368,6 +371,8 @@ public:
    ObIAllocator *allocator_;
    const ObAIFuncExprInfo &info_;
    const share::ObAiModelEndpointInfo &endpoint_info_;
+     int64_t max_retries_;
+     int64_t timeout_sec_;
    DISALLOW_COPY_AND_ASSIGN(ObAIFuncModel);
 };
 

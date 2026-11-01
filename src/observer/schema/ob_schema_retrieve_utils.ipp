@@ -1056,6 +1056,12 @@ int ObSchemaRetrieveUtils::fill_column_schema(const bool check_deleted, T &resul
       } else {}
     }
 
+    if (OB_SUCC(ret)) {
+      ObString definition;
+      ObString empty("");
+      EXTRACT_VARCHAR_FIELD_MYSQL_WITH_DEFAULT_VALUE(result, "ai_definition", definition, true, true, empty);
+      if (OB_SUCC(ret)) { ret = column.set_ai_definition(definition); }
+    }
     if (OB_SUCC(ret) && column.is_generated_column()) {
       bool skip_null_error = true;
       bool skip_column_error = true;

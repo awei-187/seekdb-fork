@@ -17,8 +17,96 @@
 #define USING_LOG_PREFIX SQL_EXE
 
 #include "ob_executor.h"
+#include "sql/engine/ob_exec_context.h"
+#include "sql/engine/ob_physical_plan.h"
+#include "sql/session/ob_inner_sql_connection.h"
+#include "query/session/ob_inner_sql_connection_access.h"
+#include "share/schema/ai_column_schema.h"
+#include "share/schema/ob_schema_getter_guard.h"
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
+
+static int ai_read_identifier(ObSqlString &sql, const ObString &name)
+{
+  int ret = sql.append("`");
+  for (int32_t i = 0; OB_SUCC(ret) && i < name.length(); ++i) {
+    if (name.ptr()[i] == '`' && OB_FAIL(sql.append("`"))) { break; }
+    ret = sql.append(name.ptr() + i, 1);
+  }
+  if (OB_SUCC(ret)) { ret = sql.append("`"); }
+  return ret;
+}
+
+static int check_ai_column_reads(ObExecContext &ctx, const ObPhysicalPlan &plan)
+{
+  int ret = OB_SUCCESS;
+  bool strict = false;
+  ObSQLSessionInfo *session = ctx.get_my_session();
+  if (!session || !session->is_user_session() || plan.ai_column_reads_.empty()) { return ret; }
+  if (OB_FAIL(session->get_sys_variable(oceanbase::share::SYS_VAR_AI_COLUMN_STRICT_READ, strict))) {
+    return ret;
+  } else if (!strict) { return ret; }
+  auto *schema_guard = ctx.get_sql_ctx()->schema_guard_;
+  if (!schema_guard || plan.ai_column_reads_.count() % 2) { return OB_ERR_UNEXPECTED; }
+  ObArenaAllocator allocator("AIColumnRead");
+  oceanbase::common::sqlclient::ObISQLConnectionGuard connection_guard;
+  ObIInnerSQLConnection *connection = nullptr;
+  if (OB_FAIL(oceanbase::query::ObInnerSQLConnectionAccess::create_connection_with_external_session(session, connection_guard))) {
+  } else if (!(connection = as_inner_sql_connection(connection_guard.get_ptr()))) {
+    ret = OB_ERR_UNEXPECTED;
+  }
+  for (int64_t i = 0; OB_SUCC(ret) && i < plan.ai_column_reads_.count(); i += 2) {
+    const uint64_t table_id = plan.ai_column_reads_.at(i), column_id = plan.ai_column_reads_.at(i + 1);
+    const oceanbase::share::schema::ObTableSchema *table = nullptr;
+    const oceanbase::share::schema::ObDatabaseSchema *database = nullptr;
+    const oceanbase::share::schema::ObColumnSchemaV2 *column = nullptr, *state = nullptr;
+    oceanbase::share::schema::AIColumnDefinition definition;
+    ObSqlString sql;
+    if (OB_FAIL(schema_guard->get_table_schema(table_id, table))) {
+    } else if (!table || !(column = table->get_column_schema(column_id)) || !column->is_ai_column()) {
+      ret = OB_SCHEMA_EAGAIN;
+    } else if (OB_FAIL(definition.decode(allocator, column->get_ai_definition()))) {
+    } else if (!(state = table->get_column_schema(definition.state_column_id_))) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(schema_guard->get_database_schema(table->get_database_id(), database))) {
+    } else if (!database) { ret = OB_ERR_UNEXPECTED; }
+    else if (OB_FAIL(sql.append("SELECT 1 FROM "))) {
+    } else if (OB_FAIL(ai_read_identifier(sql, database->get_database_name_str()))) {
+    } else if (OB_FAIL(sql.append("."))) {
+    } else if (OB_FAIL(ai_read_identifier(sql, table->get_table_name_str()))) {
+    } else if (OB_FAIL(sql.append(" WHERE "))) {
+    } else if (OB_FAIL(ai_read_identifier(sql, state->get_column_name_str()))) {
+    } else if (OB_FAIL(sql.append(" IS NULL OR "))) {
+    } else if (OB_FAIL(ai_read_identifier(sql, state->get_column_name_str()))) {
+    } else if (OB_FAIL(sql.append("<>1 LIMIT 1"))) {
+    } else {
+      ObSQLSessionInfo::StmtSavedValue saved_session;
+      ObIInnerSQLConnection::SavedValue saved_connection;
+      ObExecContext::AIColumnNestedSQLGuard nested_guard(ctx);
+      if (OB_FAIL(connection->begin_nested_session(saved_session, saved_connection, true))) {
+      } else {
+        bool incomplete = false;
+        {
+          alignas(16) ObISQLClient::ReadResult result;
+          if (OB_FAIL(connection->execute_read(sql.ptr(), result))) {
+          } else if (!result.get_result()) { ret = OB_ERR_UNEXPECTED; }
+          else {
+            ret = result.get_result()->next();
+            if (ret == OB_ITER_END) { ret = OB_SUCCESS; }
+            else if (OB_SUCC(ret)) { incomplete = true; }
+          }
+        }
+        const int end_ret = connection->end_nested_session(saved_session, saved_connection);
+        if (OB_SUCC(ret)) { ret = end_ret; }
+        if (OB_SUCC(ret) && incomplete) {
+          ret = OB_AI_COLUMN_NOT_READY;
+          LOG_USER_ERROR(OB_AI_COLUMN_NOT_READY, table_id, column_id);
+        }
+      }
+    }
+  }
+  return ret;
+}
 
 int ObExecutor::init(ObPhysicalPlan *plan)
 {
@@ -62,6 +150,7 @@ int ObExecutor::execute_plan(ObExecContext &ctx)
   } else if (OB_ISNULL(phy_plan_)) {
     ret = OB_NOT_INIT;
   } else if (OB_FAIL(session_info->set_cur_phy_plan(phy_plan_))) {
+  } else if (OB_FAIL(check_ai_column_reads(ctx, *phy_plan_))) {
   } else if (OB_FAIL(phy_plan_->get_expr_frame_info()
                                  .pre_alloc_exec_memory(ctx))) {
   } else if (batched_stmt_cnt > 0

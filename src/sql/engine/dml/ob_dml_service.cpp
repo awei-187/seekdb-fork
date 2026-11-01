@@ -630,6 +630,9 @@ int ObDMLService::process_insert_row(const ObInsCtDef &ins_ctdef,
                                       dml_op))) {
     } else if (OB_FAIL(check_filter_row(ins_ctdef, dml_op.get_eval_ctx(), is_skipped))) {
     }
+    if (OB_SUCC(ret) && !is_skipped) {
+      ret = process_ai_column_row(ins_ctdef, dml_op, 1);
+    }
 
   }
   return ret;
@@ -732,6 +735,9 @@ int ObDMLService::process_delete_row(const ObDelCtDef &del_ctdef,
     }
     LOG_DEBUG("process delete row", K(ret), K(is_skipped),
                "old_row", ROWEXPR2STR(dml_op.get_eval_ctx(), del_ctdef.old_row_));
+    if (OB_SUCC(ret) && !is_skipped) {
+      ret = process_ai_column_row(del_ctdef, dml_op, 3);
+    }
   }
 
   return ret;
@@ -827,6 +833,9 @@ int ObDMLService::process_update_row(const ObUpdCtDef &upd_ctdef,
     ret = OB_ERR_ROW_IS_REFERENCED;
   }
 
+  if (OB_SUCC(ret) && !is_skipped && upd_rtdef.is_row_changed_ && upd_ctdef.is_primary_index_) {
+    ret = process_ai_column_row(upd_ctdef, dml_op, 2);
+  }
   if (OB_SUCC(ret) && !is_skipped) {
     LOG_DEBUG("process update row", K(ret), K(is_skipped), K(upd_ctdef), K(upd_rtdef),
                 "old_row", ROWEXPR2STR(dml_op.get_eval_ctx(), upd_ctdef.old_row_),

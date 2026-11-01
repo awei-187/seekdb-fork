@@ -629,6 +629,9 @@ public:
     filter_ds_stat_cache_.reuse();
     type_demotion_flag_ = 0;
     has_hybrid_search_ = false;
+    ai_column_reads_.reset();
+    ai_retry_table_id_ = 0;
+    ai_retry_column_id_ = 0;
   }
 
   int64_t get_new_stmt_id() { return stmt_count_++; }
@@ -672,6 +675,9 @@ public:
   typedef common::ObSEArray<ObHiddenColumnItem, CALCULABLE_EXPR_NUM, common::ModulePageAllocator, true> CalculableItems;
 public:
   int64_t question_marks_count_;
+  common::ObSEArray<uint64_t, 8> ai_column_reads_;
+  uint64_t ai_retry_table_id_ = 0;
+  uint64_t ai_retry_column_id_ = 0;
   CalculableItems calculable_items_;
   //array binding param exprs, mark the all array binding param expr in the batch stmt
   common::ObSEArray<ObRawExpr*, 4, common::ModulePageAllocator, true> ab_param_exprs_;

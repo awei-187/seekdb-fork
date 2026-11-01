@@ -142,6 +142,8 @@ int ObStaticEngineCG::generate(const ObLogPlan &log_plan, ObPhysicalPlan &phy_pl
   if (OB_ISNULL(log_plan.get_plan_root())) {
     ret = OB_ERR_UNEXPECTED;
   } else if (OB_FAIL(set_properties_pre(log_plan, phy_plan))) {
+  } else if (opt_ctx_->get_root_stmt() && opt_ctx_->get_root_stmt()->get_query_ctx()
+      && OB_FAIL(phy_plan.ai_column_reads_.assign(opt_ctx_->get_root_stmt()->get_query_ctx()->ai_column_reads_))) {
   } else if (OB_FAIL(get_query_compress_type(log_plan, compress_type))) {
   } else if (OB_FAIL(postorder_generate_op(
               *log_plan.get_plan_root(), root_spec, in_root_job, is_subplan,
@@ -5488,6 +5490,30 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
       spec.is_overwrite_ = op.get_is_overwrite();
       spec.plan_->need_drive_dml_query_ = true;
     }
+    if (OB_SUCC(ret) && spec.outfile_name_.is_string_type()) {
+      ObString name = spec.outfile_name_.get_string();
+      std::string encoded(name.ptr(), name.length());
+      if (file_sql::is_file_plan(encoded)) {
+        file_sql::Schema schema;
+        if (!file_sql::decode_schema(encoded, schema) || !op.get_stmt()->is_select_stmt()) {
+          ret = OB_INVALID_ARGUMENT;
+        } else {
+          const auto *select = static_cast<const ObSelectStmt *>(op.get_stmt());
+          schema.columns.clear();
+          for (int64_t i = 0; i < select->get_select_item_size(); ++i) {
+            const SelectItem &item = select->get_select_item(i);
+            ObString column_name = item.is_real_alias_ ? item.alias_name_ : item.expr_name_;
+            schema.columns.push_back({std::string(column_name.ptr(), column_name.length()), file_sql::Type::VARCHAR});
+          }
+          if (!file_sql::encode_schema(schema, encoded)) { ret = OB_SIZE_OVERFLOW; }
+          else {
+            ObString stored;
+            OZ(ob_write_string(alloc, ObString(encoded.size(), encoded.data()), stored));
+            if (OB_SUCC(ret)) { spec.outfile_name_.set_varchar(stored); spec.outfile_name_.set_collation_type(CS_TYPE_BINARY); }
+          }
+        }
+      }
+    }
   }
   return ret;
 }
@@ -5510,6 +5536,10 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
   } else if (OB_FAIL(generate_rt_expr(*value_raw_expr, value_expr))) {
   } else {
     spec.has_correlated_expr_ = value_raw_expr->has_flag(CNT_DYNAMIC_PARAM);
+    spec.file_scan_ = value_raw_expr->is_const_expr();
+    if (spec.file_scan_) {
+      OZ(spec.file_column_indexes_.init(op.get_stmt()->get_column_size()));
+    }
     spec.value_expr_ = value_expr;
     for (int64_t i = 0; OB_SUCC(ret) && i < op.get_output_exprs().count(); ++i) {
       if (OB_FAIL(mark_expr_self_produced(op.get_output_exprs().at(i)))) {
@@ -5526,6 +5556,9 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
         OZ (mark_expr_self_produced(col_item->expr_));
         OZ (generate_rt_expr(*col_item->expr_, rt_expr));
         OZ (spec.column_exprs_.push_back(rt_expr));
+        if (spec.file_scan_) {
+          OZ(spec.file_column_indexes_.push_back(col_item->column_id_ - OB_APP_MIN_COLUMN_ID));
+        }
       }
     }
   }

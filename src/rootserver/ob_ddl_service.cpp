@@ -6513,7 +6513,9 @@ int ObDDLService::check_generated_column_modify_authority(
       ObString alter_def;
       if (OB_FAIL(old_column_schema.get_cur_default_value().get_string(old_def))) {
       } else if (OB_FAIL(alter_column_schema.get_cur_default_value().get_string(alter_def))) {
-      } else if (!ObCharset::case_insensitive_equal(old_def, alter_def)) {
+      } else if (!ObCharset::case_insensitive_equal(old_def, alter_def)
+          && !(old_column_schema.is_hidden() && alter_column_schema.is_hidden()
+              && old_column_schema.get_column_name_str().prefix_match(ObString::make_string("__ai_spec_")))) {
         ret = OB_NOT_SUPPORTED;
         LOG_USER_ERROR(OB_NOT_SUPPORTED, "Modify generated column definition");
       }

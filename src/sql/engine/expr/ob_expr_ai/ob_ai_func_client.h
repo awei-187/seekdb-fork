@@ -34,6 +34,7 @@ public:
   void clean_up();
   void reset();
   void set_timeout_sec(int64_t timeout_sec) { timeout_sec_ = timeout_sec; }
+  void set_max_retries(int64_t retries) { max_retry_times_ = std::max<int64_t>(0, retries); }
   // ai function interface
   virtual int send_post(common::ObIAllocator &allocator, 
                         const ObString &url,

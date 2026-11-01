@@ -682,6 +682,19 @@ public:
   }
   void set_is_online_stats_gathering(bool v) { is_online_stats_gathering_ = v; }
   bool is_online_stats_gathering() const { return is_online_stats_gathering_; }
+  bool is_ai_column_nested_parent() const { return ai_column_nested_parent_; }
+  // Keep this on the execution context: nested SQL may yield between fibers.
+  class AIColumnNestedSQLGuard
+  {
+  public:
+    explicit AIColumnNestedSQLGuard(ObExecContext &ctx)
+      : ctx_(ctx), previous_(ctx.ai_column_nested_parent_)
+    { ctx_.ai_column_nested_parent_ = true; }
+    ~AIColumnNestedSQLGuard() { ctx_.ai_column_nested_parent_ = previous_; }
+  private:
+    ObExecContext &ctx_;
+    bool previous_;
+  };
   void set_ddl_idempotent_autoinc_params(const int64_t slice_count,
                                          const int64_t slice_idx,
                                          const int64_t slice_row_idx,
@@ -933,6 +946,7 @@ protected:
   ObUserLoggingCtx user_logging_ctx_;
   // for online stats gathering
   bool is_online_stats_gathering_;
+  bool ai_column_nested_parent_ = false;
   
   // for calculating idempotent auto increment value in DDL
   bool is_ddl_idempotent_auto_inc_;

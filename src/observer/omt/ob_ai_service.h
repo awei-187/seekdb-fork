@@ -24,6 +24,7 @@
 #include "sql/privilege_check/ob_ai_model_priv_util.h"
 #include "share/ob_server_struct.h"
 #include "lib/worker.h"
+#include "lib/thread/thread_pool.h"
 
 namespace oceanbase
 {
@@ -43,16 +44,17 @@ private:
   DISALLOW_COPY_AND_ASSIGN(ObAiServiceGuard);
 };
 
-class ObAiService
+class ObAiService : public lib::ThreadPool
 {
 public:
   ObAiService();
   virtual ~ObAiService();
   static int server_module_init(ObAiService* &ai_service);
   int init();
-  int start() { return OB_SUCCESS; }
-  void stop() {};
-  void wait() {};
+  int start() override;
+  void stop() override { lib::ThreadPool::stop(); }
+  void wait() override { lib::ThreadPool::wait(); }
+  void run1() override;
   void destroy();
 public:
   int get_ai_service_guard(ObAiServiceGuard &ai_service_guard);

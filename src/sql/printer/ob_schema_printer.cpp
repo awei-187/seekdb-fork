@@ -20,6 +20,7 @@
 #include "sql/resolver/expr/ob_raw_expr_util.h"
 
 #include "sql/resolver/ddl/ob_fts_index_builder_util.h"
+#include "share/schema/ai_column_schema.h"
 
 namespace oceanbase
 {
@@ -212,6 +213,14 @@ int ObSchemaPrinter::print_table_definition_columns(const ObTableSchema &table_s
           if (OB_FAIL(print_generated_column_definition(*col, buf, buf_len, table_schema, pos))) {
           }
         }
+        if (OB_SUCC(ret) && col->is_ai_column()) {
+          AIColumnDefinition definition;
+          if (OB_FAIL(definition.decode(allocator, col->get_ai_definition()))) {
+          } else if (OB_FAIL(databuff_printf(buf, buf_len, pos,
+              " AI COLUMN (%.*s) WITH (sync_mode='async', max_retries=%ld)",
+              definition.expression_.length(), definition.expression_.ptr(), definition.max_retries_))) {
+          }
+        }
         // mysql mode
         if (OB_SUCC(ret)) {
           if (!col->is_nullable()) {
@@ -231,7 +240,7 @@ int ObSchemaPrinter::print_table_definition_columns(const ObTableSchema &table_s
             SHARE_SCHEMA_LOG(WARN, "fail to print geometry srid", K(ret), K(srid));
           }
         }
-        if (OB_SUCC(ret) && !col->is_generated_column()) {
+        if (OB_SUCC(ret) && !col->is_generated_column() && !col->is_ai_column()) {
           //if column is not permit null and default value does not specify , don't  display DEFAULT NULL
           if (OB_SUCC(ret)) {
             if (!(ObNullType == col->get_cur_default_value().get_type() && !col->is_nullable())

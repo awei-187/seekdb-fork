@@ -24,6 +24,7 @@
 #include "sql/parser/parse_malloc.h"
 #include "query/vector/ob_vector_index_util.h"
 #include "sql/das/ob_domain_id.h"
+#include "share/schema/ai_column_schema.h"
 
 namespace oceanbase
 {
@@ -481,6 +482,71 @@ int ObDelUpdResolver::check_update_vector_col_with_vector_index(const ObTableSch
   return ret;
 }
 
+int ObDelUpdResolver::resolve_ai_column_assignments(ObIArray<ObTableAssignment> &assigns,
+    int64_t index, const TableItem &item, const ObTableSchema &table)
+{
+  int ret = OB_SUCCESS;
+  if (!session_info_->is_user_session()) { return ret; }
+  const int64_t original = assigns.at(index).assignments_.count();
+  for (int64_t c = 0; OB_SUCC(ret) && c < table.get_column_count(); ++c) {
+    const ObColumnSchemaV2 *column = table.get_column_schema_by_idx(c);
+    if (!column || !column->is_ai_column()) { continue; }
+    AIColumnDefinition definition;
+    bool related = false;
+    ObSEArray<ObRawExpr *, 8> equalities;
+    if (OB_FAIL(definition.decode(*allocator_, column->get_ai_definition()))) { break; }
+    for (int64_t a = 0; a < original; ++a) {
+      const uint64_t id = assigns.at(index).assignments_.at(a).column_expr_->get_column_id();
+      const ObColumnSchemaV2 *assigned = table.get_column_schema(id);
+      related |= assigned && assigned->is_rowkey_column();
+      related |= has_exist_in_array(definition.dependency_ids_, id);
+      if ((assigned && assigned->is_rowkey_column()) || has_exist_in_array(definition.dependency_ids_, id)) {
+        ObRawExpr *equal = nullptr;
+        const ObAssignment &source = assigns.at(index).assignments_.at(a);
+        if (OB_FAIL(ObRawExprUtils::build_common_binary_op_expr(*params_.expr_factory_, T_OP_NSEQ,
+            source.column_expr_, source.expr_, equal))) { break; }
+        else if (OB_FAIL(equalities.push_back(equal))) { break; }
+      }
+    }
+    if (OB_FAIL(ret) || !related) { continue; }
+    ObRawExpr *unchanged = nullptr;
+    if (OB_FAIL(ObRawExprUtils::build_and_expr(*params_.expr_factory_, equalities, unchanged))) { break; }
+    const uint64_t ids[] = {column->get_column_id(), definition.state_column_id_, definition.request_column_id_};
+    for (uint64_t id : ids) {
+      if (OB_FAIL(ret)) { break; }
+      const ObColumnSchemaV2 *target = table.get_column_schema(id);
+      ObSEArray<ObColumnRefRawExpr *, 1> expressions;
+      ObAssignment assignment;
+      if (!target) { ret = OB_ERR_UNEXPECTED; }
+      else if (OB_FAIL(add_column_to_stmt(item, *target, expressions))) {
+      } else if (expressions.count() != 1) { ret = OB_ERR_UNEXPECTED; }
+      else {
+        ColumnItem *col_item = get_stmt()->get_column_item_by_id(item.table_id_, id);
+        assignment.column_expr_ = expressions.at(0);
+        assignment.expr_ = expressions.at(0);
+        assignment.is_implicit_ = true;
+        // Keep a separate datum slot: the runtime invalidation must not alter
+        // the old value used by index deletion and transaction rollback.
+        if (id == column->get_column_id()) {
+          ObRawExpr *null_value = nullptr;
+          // Invalidate in the native expression plan, before dependent vector
+          // index expressions are evaluated. A no-op dependency write retains
+          // the existing result and does not enqueue another request.
+          if (OB_FAIL(ObRawExprUtils::build_null_expr(*params_.expr_factory_, null_value))) {
+          } else if (OB_FAIL(ObRawExprUtils::build_case_when_expr(*params_.expr_factory_,
+              unchanged, assignment.expr_, null_value, assignment.expr_))) {
+          } else { ret = assignment.expr_->formalize(session_info_); }
+        }
+        if (OB_FAIL(ret)) {
+        } else if (OB_FAIL(ObRawExprUtils::build_wrapper_inner_expr(*params_.expr_factory_,
+            *session_info_, assignment.expr_, assignment.expr_))) {
+        } else { ret = add_assignment(assigns, &item, col_item, assignment); }
+      }
+    }
+  }
+  return ret;
+}
+
 int ObDelUpdResolver::resolve_additional_assignments(ObIArray<ObTableAssignment> &assigns,
                                                      const ObStmtScope scope)
 {
@@ -512,6 +578,7 @@ int ObDelUpdResolver::resolve_additional_assignments(ObIArray<ObTableAssignment>
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("fail to get table schema", KPC(table_item), K(table_schema));
     } else if (OB_FAIL(table_schema->has_before_update_row_trigger(*schema_guard, trigger_exist))) {
+    } else if (OB_FAIL(resolve_ai_column_assignments(assigns, i, *table_item, *table_schema))) {
     } else if (OB_FAIL(generate_wrapper_expr_for_assignemnts(assigns.at(i).assignments_, trigger_exist))) {
     } else if (OB_FAIL(check_update_vector_col_with_vector_index(table_schema,
                                                                  schema_guard,

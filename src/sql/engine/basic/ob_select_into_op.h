@@ -18,6 +18,7 @@
 #define SRC_SQL_ENGINE_BASIC_OB_SELECT_INTO_OP_H_
 
 #include "sql/engine/ob_operator.h"
+#include "sql/engine/basic/file_scan_utils.h"
 #include "lib/file/ob_file.h"
 #include "sql/engine/cmd/ob_load_data_parser.h"
 #include "sql/engine/basic/ob_select_into_basic.h"
@@ -264,6 +265,12 @@ private:
   bool file_need_split(int64_t file_size);
 
 private:
+  int open_file_copy();
+  int run_file_copy(bool vectorized);
+  int write_file_copy_row();
+  std::unique_ptr<file_sql::CsvWriter> file_copy_writer_;
+  bool file_copy_mode_ = false;
+  bool file_copy_done_ = false;
   int64_t top_limit_cnt_;
   bool is_first_;
   ObObj field_str_;

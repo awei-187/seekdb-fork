@@ -205,6 +205,8 @@ public:
   int resolve_joined_table_item(const ParseNode &parse_node, JoinedTable *&joined_table);
   int resolve_function_table_item(const ParseNode &table_node,
                                   TableItem *&table_item);
+  int resolve_file_table_item(const ParseNode &table_node, TableItem *&table_item);
+  int resolve_file_table_columns(const TableItem &table_item, common::ObIArray<ColumnItem> &columns);
   int resolve_json_table_item(const ParseNode &table_node,
                               TableItem *&table_item);
   int resolve_unnest_item(const ParseNode &table_node, TableItem *&table_item);
@@ -360,6 +362,7 @@ protected:
                                    ObIArray<ObRawExpr*> &real_exprs,
                                    ObRawExpr *&real_ref_expr);
   int resolve_basic_column_ref(const ObQualifiedName &q_name, ObRawExpr *&real_ref_expr);
+  int record_ai_column_read(const ObRawExpr *expr, int depth = 0);
   int resolve_basic_column_item(const TableItem &table_item,
                                 const common::ObString &column_name,
                                 bool include_hidden,

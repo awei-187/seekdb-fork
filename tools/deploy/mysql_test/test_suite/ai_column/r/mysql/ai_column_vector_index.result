@@ -71,17 +71,17 @@ vector_task_removed
 explain select id from ai_column_p0_vector.docs
 order by l2_distance(emb, [0,0,0,0]) approximate limit 3;
 Query Plan
-================================================================
-|ID|OPERATOR         |NAME               |EST.ROWS|EST.TIME(us)|
-----------------------------------------------------------------
-|0 |VECTOR INDEX SCAN|docs(idx_p0_ai_emb)|4       |15          |
-================================================================
+=======================================================================
+|ID|OPERATOR                               |NAME|EST.ROWS|EST.TIME(us)|
+-----------------------------------------------------------------------
+|0 |VECTOR INDEX ADAPTIVE SCAN (PRE-FILTER)|docs|3       |32          |
+=======================================================================
 Outputs & filters:
 -------------------------------------
-  0 - output([docs.id]), filter(nil), rowset=16
-      access([docs.id]), partitions(p0)
-      is_index_back=true, is_global_index=false, 
-      range_key([docs.__vid_0], [docs.__type_0_0]), range(MIN,MIN ; MAX,MAX)always true
+  0 - output([docs.id]), filter([docs.emb IS NOT NULL]), rowset=16
+      access([docs.id], [docs.emb]), partitions(p0)
+      is_index_back=true, is_global_index=false, filter_before_indexback[false],
+      range_key([docs.id]), range(MIN ; MAX)always true
 select count(*) = 2 and sum(id = 1) = 1 and sum(id = 2) = 1
 as regenerated_vector_visible_to_ann
 from (

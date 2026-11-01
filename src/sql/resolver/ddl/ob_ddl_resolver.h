@@ -59,7 +59,8 @@ enum NUMCHILD {
   COLUMN_DEFINITION_NUM_CHILD = 4,
   COLUMN_DEF_NUM_CHILD = 3,
   INDEX_NUM_CHILD = 5,
-  GEN_COLUMN_DEFINITION_NUM_CHILD = 7
+  GEN_COLUMN_DEFINITION_NUM_CHILD = 7,
+  AI_COLUMN_DEFINITION_NUM_CHILD = 8
 };
 
 struct ObColumnResolveStat
@@ -519,6 +520,8 @@ protected:
       const bool is_create_table_as = false,
       const bool allow_has_default = true);
   int drop_not_null_constraint(const share::schema::ObColumnSchemaV2 &column);
+  int resolve_ai_column_definition(share::schema::ObColumnSchemaV2 &column, const ParseNode &node);
+  int finalize_ai_columns(share::schema::ObTableSchema &table, uint64_t &max_column_id);
   int resolve_normal_column_attribute_constr_not_null(ObColumnSchemaV2 &column,
                                                       ParseNode *attrs_node,
                                                       ObColumnResolveStat &resolve_stat);

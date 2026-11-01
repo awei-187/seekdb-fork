@@ -932,6 +932,9 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
       } else if (OB_FAIL(resolve_primary_key_node(*primary_node, stats))) {
       }
       if (OB_SUCC(ret)) {
+        if (OB_SUCC(ret) && RESOLVE_NON_COL != resolve_rule) {
+          ret = finalize_ai_columns(table_schema, cur_column_id_);
+        }
         table_schema.set_max_used_column_id(cur_column_id_);
         if (0 != autoinc_column_id) {
           table_schema.set_autoinc_column_id(autoinc_column_id);

@@ -16,6 +16,8 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/ob_resolver.h"
+#include "sql/parser/ob_parser.h"
+#include <string>
 #include "lib/utility/ob_smart_call.h"
 #include "lib/stat/ob_diagnostic_info_guard.h"
 #include "sql/resolver/cmd/ob_alter_system_resolver.h"
@@ -137,8 +139,89 @@ int ObResolver::select_stmt_resolver_func(ObResolverParams &params, const ParseN
   return ret;
 }
 
+namespace
+{
+std::string file_describe_literal(const ObString &text)
+{
+  if (text.empty()) { return "''"; }
+  static const char digits[] = "0123456789ABCDEF";
+  std::string result = "CONVERT(X'";
+  for (int64_t i = 0; i < text.length(); ++i) {
+    const uint8_t c = text.ptr()[i];
+    result += digits[c >> 4]; result += digits[c & 15];
+  }
+  return result + "' USING utf8mb4)";
+}
+}
+
+int ObResolver::resolve_file_describe(IsPrepared prepared, const ParseNode &query, ObStmt *&stmt)
+try
+{
+  int ret = OB_SUCCESS;
+  ObStmt *resolved = nullptr;
+  ObResolver resolver(params_);
+  if (OB_FAIL(resolver.resolve(prepared, query, resolved))) {
+  } else if (!resolved || !resolved->is_select_stmt()) { ret = OB_INVALID_ARGUMENT; }
+  else {
+    const auto &select = *static_cast<const ObSelectStmt *>(resolved);
+    std::string sql;
+    for (int64_t i = 0; i < select.get_select_item_size(); ++i) {
+      const SelectItem &item = select.get_select_item(i);
+      const ObExprResType &type = item.expr_->get_result_type();
+      const char *name = "VARCHAR";
+      switch (type.get_type()) {
+        case ObIntType: case ObUInt64Type: name = "BIGINT"; break;
+        case ObDoubleType: case ObFloatType: name = "DOUBLE"; break;
+        case ObTinyIntType: name = "BOOLEAN"; break;
+        case ObDateType: name = "DATE"; break;
+        case ObDateTimeType: case ObTimestampType: name = "DATETIME"; break;
+        case ObNullType: name = "NULL"; break;
+        default: break;
+      }
+      if (i) { sql += " UNION ALL "; }
+      sql += "SELECT " + file_describe_literal(item.is_real_alias_ ? item.alias_name_ : item.expr_name_)
+          + " AS column_name, '" + name + "' AS column_type, '"
+          + ((type.get_result_flag() & NOT_NULL_FLAG) ? "NO" : "YES")
+          + "' AS `null`, NULL AS `key`, NULL AS `default`, NULL AS extra";
+    }
+    ParseResult parsed;
+    ObParser parser(*params_.allocator_, params_.session_info_->get_sql_mode());
+    if (sql.empty()) { ret = OB_INVALID_ARGUMENT; }
+    else if (OB_FAIL(parser.parse(ObString(sql.size(), sql.data()), parsed))) {
+    } else if (!parsed.result_tree_ || parsed.result_tree_->num_child_ != 1 || !parsed.result_tree_->children_[0]) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      ObResolver metadata_resolver(params_);
+      ret = metadata_resolver.resolve(IS_NOT_PREPARED_STMT, *parsed.result_tree_->children_[0], stmt);
+    }
+  }
+  return ret;
+}
+catch (const std::bad_alloc &) { return OB_ALLOCATE_MEMORY_FAILED; }
+catch (const std::exception &error)
+{
+  LOG_USER_ERROR(OB_INVALID_ARGUMENT, error.what());
+  return OB_INVALID_ARGUMENT;
+}
+
+
 int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObStmt *&stmt)
 {
+  if (parse_tree.type_ == T_ALTER_TABLE && parse_tree.num_child_ == 5
+      && parse_tree.children_[3] && parse_tree.children_[3]->value_ == 3) {
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "combining AI COLUMN RETRY with another ALTER action");
+    return OB_NOT_SUPPORTED;
+  }
+  if (parse_tree.type_ == T_ALTER_TABLE && parse_tree.num_child_ == 5
+      && parse_tree.children_[3] && parse_tree.children_[3]->value_ == 2) {
+    return resolve_ai_column_retry(if_prepared, parse_tree, stmt);
+  }
+  if (parse_tree.type_ == T_EXPLAIN && parse_tree.num_child_ == 5
+      && parse_tree.children_[0] && parse_tree.children_[0]->type_ == T_INT
+      && parse_tree.children_[0]->value_ == 1
+      && parse_tree.children_[4] && parse_tree.children_[4]->type_ == T_SELECT) {
+    return resolve_file_describe(if_prepared, *parse_tree.children_[4], stmt);
+  }
 #define REGISTER_STMT_RESOLVER(name)                                   \
   do {                                                                 \
     ret = stmt_resolver_func<Ob##name##Resolver>(params_, *real_parse_tree, stmt); \

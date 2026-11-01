@@ -15,6 +15,7 @@
  */
 
 #define USING_LOG_PREFIX SQL_RESV
+#include "sql/engine/basic/file_scan_utils.h"
 
 #include "config_bridge.h"
 #include "share/config/ob_config_helper.h"
@@ -120,6 +121,23 @@ int ObResolverUtils::get_all_function_table_column_names(const TableItem &table_
                                                          ObResolverParams &params,
                                                          ObIArray<ObString> &column_names)
 {
+  if (table_item.function_table_expr_ && table_item.function_table_expr_->is_const_raw_expr()) {
+    try {
+      const auto *constant = static_cast<const ObConstRawExpr *>(table_item.function_table_expr_);
+      const ObString encoded = constant->get_value().get_string();
+      file_sql::Schema schema;
+      if (!file_sql::decode_schema(std::string(encoded.ptr(), encoded.length()), schema)) {
+        return OB_INVALID_ARGUMENT;
+      }
+      for (const auto &column : schema.columns) {
+        ObString name;
+        int ret = ob_write_string(*params.allocator_, ObString(column.name.size(), column.name.data()), name);
+        if (OB_SUCCESS != ret || OB_SUCCESS != (ret = column_names.push_back(name))) { return ret; }
+      }
+      return OB_SUCCESS;
+    } catch (const std::bad_alloc &) { return OB_ALLOCATE_MEMORY_FAILED; }
+    catch (const std::exception &) { return OB_INVALID_ARGUMENT; }
+  }
   int ret = OB_SUCCESS;
   ObRawExpr *table_expr = NULL;
   ObPLPackageGuard *package_guard = nullptr;

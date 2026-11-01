@@ -479,6 +479,7 @@ public:
   //the DML statement needs to be executed through get_next_row
   bool need_drive_dml_query_;
   ExprFixedArray var_init_exprs_;
+  common::ObFixedArray<uint64_t, common::ObIAllocator> ai_column_reads_;
   sql::ObExecutedSqlStatRecord sql_stat_record_value_;
 private:
   // Mark whether the plan is a late materialization plan
